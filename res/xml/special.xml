@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<Keyboard xmlns:android="http://schemas.android.com/apk/res/android"
+    android:keyWidth="10%p"
+    android:horizontalGap="0px"
+    android:verticalGap="0px"
+    android:keyHeight="@dimen/key_height"
+    android:color="#000000"
+    android:textColor="#0000FF"
+    >
+	<Row>
+	<Key android:codes="-10" android:keyLabel="Esc"  android:keyEdgeFlags="left"/>
+        <Key android:codes="-11" android:keyLabel="F1"/>
+        <Key android:codes="-12" android:keyLabel="F2"/>
+        <Key android:codes="-13" android:keyLabel="F3"/>
+        <Key android:codes="-14" android:keyLabel="F4"/>
+        <Key android:codes="-15" android:keyLabel="F5"/>
+        <Key android:codes="-16" android:keyLabel="F6"/>
+        <Key android:codes="-17" android:keyLabel="F7"/>
+        <Key android:codes="-18" android:keyLabel="F8"/>
+        <Key android:codes="-19" android:keyLabel="F9" android:keyEdgeFlags="right"/>
+	</Row>
+	
+	<Row>
+        <Key android:codes="-20" android:keyLabel="Shift"  android:isSticky="true" android:keyWidth="15%p" android:keyEdgeFlags="left"/>
+        <Key android:codes="-21" android:isSticky="true" android:keyLabel="Ctrl"  android:keyWidth="15%p" />
+        
+         <Key android:codes="-23" android:keyLabel="F10" android:keyWidth="15%p"/>
+        <Key android:codes="-24" android:keyLabel="Up" android:keyWidth="15%p" />
+       
+        <Key android:codes="-25" android:keyLabel="F11"/>
+        <Key android:codes="-26" android:keyLabel="F12" />
+        <Key android:codes="-22" android:keyLabel="Tab" android:keyWidth="20%p" android:keyEdgeFlags="right"/>
+    <!--      <Key android:codes="-27" android:keyLabel="Home"  android:keyWidth="15%p"/>
+        <key android:codes="-28" android:keyLabel="Ins"/>  -->     
+         
+          
+    </Row>
+    
+     <Row>
+        <Key android:codes="-30" android:isSticky="true" android:keyLabel="Caps"  android:keyWidth="15%p" android:keyEdgeFlags="left"/>
+        <Key android:codes="-31" android:isSticky="true" android:keyLabel="Alt" android:keyWidth="15%p" />
+        <Key android:codes="-33"  android:keyLabel="lt" android:keyWidth="15%p"/>
+        <Key android:codes="-34" android:keyLabel="D"  android:keyWidth="15%p"/>
+        <Key android:codes="-35"  android:keyLabel="rt"  android:keyWidth="15%p"/>
+        <Key android:codes="-38" android:keyLabel="End" />    
+        <Key android:codes="-36" android:keyLabel="Del" android:keyEdgeFlags="right"  android:keyWidth="15%p"/>
+        
+    </Row>
+    <Row android:rowEdgeFlags="bottom">
+        <Key android:codes="-4" android:keyLabel="abc" 
+                android:keyWidth="20%p" android:keyEdgeFlags="left"/>
+                 <Key android:codes="-2" android:keyWidth="15%p" android:keyLabel="123" />
+      
+        <Key android:codes="32" android:keyIcon="@drawable/space" 
+                android:keyWidth="30%p" android:isRepeatable="true"/>
+        <Key android:codes="67" android:keyIcon="@drawable/delete"
+        	android:isRepeatable="true"
+                android:keyWidth="15%p"/>
+                <Key android:codes="66" android:keyIcon="@drawable/enter" 
+                android:keyWidth="20%p" android:keyEdgeFlags="right"/>
+      
+    </Row>
+    
+    
+    </Keyboard>
