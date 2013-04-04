@@ -1,19 +1,9 @@
 package com.spai.remotedesktop;
 
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.zip.GZIPInputStream;
-
-import org.apache.commons.io.IOUtils;
-
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
@@ -25,8 +15,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 import android.inputmethodservice.Keyboard;
 import android.inputmethodservice.Keyboard.Key;
+import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.Display;
@@ -36,38 +26,26 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
 import android.widget.LinearLayout;
-
 import com.sonyericsson.zoom.DynamicZoomControl;
 import com.sonyericsson.zoom.ImageZoomView;
 import com.sonyericsson.zoom.LongPressZoomListener;
 
 public class RemoteDesktopTestActivity extends Activity {
 	/** Called when the activity is first created. */
-	
 
-	private static int HEADER_SIZE = 8;
-	private static int SESSION_START=1;	
-	private static int DATAGRAM_MAX_SIZE = 65507;
 	public static String IP_ADDRESS = null;
-	public static int PORT = 6550;
-	private int sendPort = 6551;
-	private long lastTimeSent = 0;
-	private DatagramSocket frameSocket;
-	private DatagramSocket congestionSocket;
-	Handler hand;
-	Bitmap bp = null;
 	Runnable run;
 	SharedPreferences setpref;
 	Timer resend;
-
 	private ImageZoomView mZoomView;
 	private DynamicZoomControl mZoomControl;
 	private Bitmap mBitmap;
 	private LongPressZoomListener mZoomListener;
 	private boolean canReceiveFrame = true;
 	private connect obj;
+	private FrameReceiver receiver;
+	private congestionControl control;
 
-	
 	Keyboard customkeyboard;
 	keyboardview customview;
 	boolean shiftPressed;
@@ -90,9 +68,8 @@ public class RemoteDesktopTestActivity extends Activity {
 	LinearLayout container;
 	boolean isKeyboardShown = false;
 	AlertDialog quitDialog;
-	boolean settingsCalled=false;
-	
-	
+	boolean settingsCalled = false;
+
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -102,18 +79,17 @@ public class RemoteDesktopTestActivity extends Activity {
 
 		mZoomControl = new DynamicZoomControl();
 		mZoomView = (ImageZoomView) findViewById(R.id.zoomview);
-		container=(LinearLayout)findViewById(R.id.container);
+		container = (LinearLayout) findViewById(R.id.container);
 		customview = (keyboardview) findViewById(R.id.keyboard_view);
 		mBitmap = BitmapFactory.decodeResource(getResources(),
 				R.drawable.connecting);
 		Bundle extras = getIntent().getExtras();
 		IP_ADDRESS = extras.getString("ipaddress");
-		obj=new connect();
+		obj = new connect();
 		obj.connectserver(IP_ADDRESS);
-		hand=new Handler();
 
 		mZoomListener = new LongPressZoomListener(getApplicationContext(),
-				display, mZoomView,obj);
+				display, mZoomView, obj);
 		mZoomListener.setZoomControl(mZoomControl);
 		mZoomView.setZoomState(mZoomControl.getZoomState());
 		mZoomView.setImage(mBitmap);
@@ -121,42 +97,17 @@ public class RemoteDesktopTestActivity extends Activity {
 		mZoomControl.setAspectQuotient(mZoomView.getAspectQuotient());
 		resetZoomState();
 
-		resend = new Timer();
-		resend.schedule(new reSend(), 50,50);
-		
-		
-		
-		setpref=PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+		setpref = PreferenceManager
+				.getDefaultSharedPreferences(getApplicationContext());
 		pref = getSharedPreferences(prefname, 0);
 		editor = pref.edit();
 		refreshKeyboardState();
 
-		
-		try {
+		receiver = new FrameReceiver();
 
-			congestionSocket = new DatagramSocket();
-
-			frameSocket = new DatagramSocket(PORT);
-
-		}
-
-		catch (Exception e) {
-
-		}
-
-		Thread frameThread = new Thread(new Runnable() {
-
-			@Override
-			public void run() {
-				// TODO Auto-generated method stub
-
-				receiveFrame();
-			}
-		});
-
-		frameThread.start();
-		
-		
+		receiver.execute(IP_ADDRESS, mZoomView, mZoomControl);
+		resend = new Timer();
+		resend.schedule(new reSend(), 50, 50);
 
 	}
 
@@ -168,103 +119,31 @@ public class RemoteDesktopTestActivity extends Activity {
 
 	}
 
+	class congestionControl extends AsyncTask<Void, Void, Void> {
+
+		protected Void doInBackground(Void... voids) {
+
+			receiver.send();
+
+			return null;
+		}
+
+	}
+
 	public class reSend extends TimerTask {
 		public void run() {
 
-			if ((System.currentTimeMillis() - lastTimeSent) > 1000) {
+			if (control == null
+					|| (System.currentTimeMillis() - receiver.lastTimeSent) > 1000
+					&& !(control.getStatus() == AsyncTask.Status.RUNNING)) {
 
-				send();
+				control = new congestionControl();
+				control.execute();
+
 			}
-
 		}
 	}
 
-	public void receiveFrame() {
-
-		try {
-
-			int currentSession = -1;
-			int slicesStored = 0;
-			int[] slicesCol = null;
-			byte[] imageData = null;
-			boolean sessionAvailable = false;
-
-			
-			byte[] buffer = new byte[DATAGRAM_MAX_SIZE];
-			lastTimeSent=System.currentTimeMillis();
-
-			while (canReceiveFrame) {
-				send();
-				Log.v("Remotedesktop","inside");
-				lastTimeSent = System.currentTimeMillis();
-
-				DatagramPacket dp = new DatagramPacket(buffer, buffer.length);
-				frameSocket.receive(dp);
-				
-				byte[] data = dp.getData();
-				short session = (short) (data[1] & 0xff);
-				short slices = (short) (data[2] & 0xff);
-				int maxPacketSize = (int) ((data[3] & 0xff) << 8 | (data[4] & 0xff)); // mask
-				short slice = (short) (data[5] & 0xff);
-				int size = (int) ((data[6] & 0xff) << 8 | (data[7] & 0xff)); // mask
-
-				if ((data[0]) == SESSION_START) {
-					if (session != currentSession) {
-						currentSession = session;
-						slicesStored = 0;
-						imageData = new byte[slices * maxPacketSize];
-						slicesCol = new int[slices];
-						sessionAvailable = true;
-
-					}
-				}
-
-				if (sessionAvailable && session == currentSession) {
-					if (slicesCol != null && slicesCol[slice] == 0) {
-						slicesCol[slice] = 1;
-						System.arraycopy(data, HEADER_SIZE, imageData, slice
-								* maxPacketSize, size);
-						slicesStored++;
-						
-					}
-				}
-
-				if (slicesStored == slices) {
-
-					
-					ByteArrayOutputStream out=new ByteArrayOutputStream();
-					IOUtils.copy(new GZIPInputStream(new ByteArrayInputStream(imageData)),out);
-					
-					imageData=out.toByteArray();
-
-					bp = BitmapFactory.decodeByteArray(imageData, 0,
-							imageData.length);
-					hand.removeCallbacks(run);
-					hand.post(run);
-
-					mZoomView.post(new Runnable() {
-
-						@Override
-						public void run() {
-							// TODO Auto-generated method stub
-
-							if (bp != null)
-								mZoomView.setImage(bp);
-							
-							mZoomControl.getZoomState().notifyObservers();
-						
-						}
-					});
-					
-
-				}
-
-			}
-		} catch (Exception e) {
-
-		}
-	}
-	
 	public boolean onCreateOptionsMenu(Menu menu) {
 		super.onCreateOptionsMenu(menu);
 		MenuItem keyboard = menu.add(0, 1, Menu.NONE, "Keyboard");
@@ -275,20 +154,6 @@ public class RemoteDesktopTestActivity extends Activity {
 		return true;
 	}
 
-	void send() {
-		String s = "send";
-		//Log.v("length",s.getBytes().length+"");
-		try {
-
-			DatagramPacket p = new DatagramPacket(s.getBytes(),
-					s.getBytes().length, InetAddress.getByName(IP_ADDRESS),
-					sendPort);
-			congestionSocket.send(p);
-		} catch (Exception e) {
-
-		}
-	}
-	
 	public void refreshKeyboardState() {
 
 		capspressed = pref.getBoolean("capspressed", false);
@@ -299,16 +164,15 @@ public class RemoteDesktopTestActivity extends Activity {
 		Log.v("shift presses", kshiftpressed + "");
 		keyboardType = pref.getInt("keyboardType", R.xml.keyboard);
 	}
-	
+
 	public boolean onOptionsItemSelected(MenuItem item) {
 		super.onOptionsItemSelected(item);
 		if (item.getItemId() == 1) {
 
-			
-				showKeyboard();
-			
+			showKeyboard();
+
 		} else if (item.getItemId() == 2) {
-			
+
 			Intent i = new Intent();
 			i.setClass(getApplicationContext(), Settings.class);
 			RemoteDesktopTestActivity.this.startActivity(i);
@@ -316,32 +180,32 @@ public class RemoteDesktopTestActivity extends Activity {
 
 		return true;
 	}
-	
+
 	public void showKeyboard() {
 
 		refreshKeyboardState();
 		Bundle extra = getIntent().getExtras();
 
-		/*if (extra.containsKey("not")) {
-			keyboardType = R.xml.special;
-		}*/
+		/*
+		 * if (extra.containsKey("not")) { keyboardType = R.xml.special; }
+		 */
 
 		createKeyboard(keyboardType);
 	}
-	
+
 	public void saveKeyboardState() {
 
 		altpressed = listener.altpressed;
 		capspressed = listener.capspressed;
 		kshiftpressed = listener.kshiftpressed;
 		ctrlpressed = listener.ctrlpressed;
-		/*if (notification) {
-			if (capspressed || altpressed || kshiftpressed || ctrlpressed)
-				//createNotification();
-		}*/
+		/*
+		 * if (notification) { if (capspressed || altpressed || kshiftpressed ||
+		 * ctrlpressed) //createNotification(); }
+		 */
 
 	}
-	
+
 	public void createKeyboard(int id) {
 
 		isKeyboardShown = true;
@@ -372,8 +236,8 @@ public class RemoteDesktopTestActivity extends Activity {
 
 		customview
 				.setOnKeyboardActionListener(listener = new keyboardactionlistener(
-						RemoteDesktopTestActivity.this, customkeyboard, customview,
-						state, obj));
+						RemoteDesktopTestActivity.this, customkeyboard,
+						customview, state, obj));
 
 		if (id == R.xml.keyboard) {
 			if (shiftPressed) {
@@ -401,16 +265,14 @@ public class RemoteDesktopTestActivity extends Activity {
 				LinearLayout.LayoutParams param = new LinearLayout.LayoutParams(
 						LinearLayout.LayoutParams.FILL_PARENT, myheight
 								- customkeyboard.getHeight());
-				
+
 				mZoomView.setLayoutParams(param);
 			}
 		});
 
 	}
-	
-	public boolean onKeyDown(int keyCode, KeyEvent event) {
 
-		
+	public boolean onKeyDown(int keyCode, KeyEvent event) {
 
 		if (keyCode != KeyEvent.KEYCODE_BACK
 				&& keyCode != KeyEvent.KEYCODE_MENU
@@ -457,61 +319,51 @@ public class RemoteDesktopTestActivity extends Activity {
 			isKeyboardShown = false;
 
 			return true;
-		}
-		else if (keyCode==KeyEvent.KEYCODE_BACK&&!isKeyboardShown)
-		{
-			 quitDialog=new AlertDialog.Builder(this).create();
-			 
-			 
+		} else if (keyCode == KeyEvent.KEYCODE_BACK && !isKeyboardShown) {
+			quitDialog = new AlertDialog.Builder(this).create();
+
 			quitDialog.setButton("Yes", new DialogInterface.OnClickListener() {
-				
+
 				@Override
 				public void onClick(DialogInterface dialog, int which) {
 					// TODO Auto-generated method stub
-					
-					
+
 					finish();
-					
-					
+
 				}
 			});
-			
+
 			quitDialog.setButton2("No", new DialogInterface.OnClickListener() {
-				
+
 				@Override
 				public void onClick(DialogInterface dialog, int which) {
 					// TODO Auto-generated method stub
-					
+
 					quitDialog.cancel();
-					
+
 				}
 			});
-			
+
 			quitDialog.setTitle("Close Connection");
-			quitDialog.setMessage("Are you sure you want to close connection ?");
+			quitDialog
+					.setMessage("Are you sure you want to close connection ?");
 			quitDialog.show();
-			
-		}
-		else if(keyCode==KeyEvent.KEYCODE_HOME)
-		{
-			Log.v("home","true");
+
+		} else if (keyCode == KeyEvent.KEYCODE_HOME) {
+			Log.v("home", "true");
 			finish();
-		}
-		else if(keyCode==KeyEvent.KEYCODE_VOLUME_UP)
-		{
-			obj.send("scroll,"+(-1-setpref.getInt("ScrollSensitivity",2)));
+		} else if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+			obj.send("scroll," + (-1 - setpref.getInt("ScrollSensitivity", 2)));
 			return true;
-		}
-		else if(keyCode==KeyEvent.KEYCODE_VOLUME_DOWN)
-		{
-			obj.send("scroll,"+(+1+setpref.getInt("ScrollSensitivity",2)));
+		} else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+			obj.send("scroll," + (+1 + setpref.getInt("ScrollSensitivity", 2)));
 			return true;
 		}
 
 		return super.onKeyDown(keyCode, event);
 
 	}
-	
+
 	public void saveKeyState() {
 		editor.putBoolean("altpressed", altpressed);
 		editor.putBoolean("capspressed", capspressed);
@@ -550,52 +402,17 @@ public class RemoteDesktopTestActivity extends Activity {
 		}
 	}
 
-	/*public void createNotification() {
-
-		String msg = "pressed";
-
-		NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-
-		Notification not = new Notification(R.drawable.touchpad, "Notification",
-				System.currentTimeMillis());
-		Intent notIntent = new Intent(this, AirmouseActivity.class);
-
-		if (ctrlpressed)
-			msg = "Ctrl," + msg;
-		if (altpressed)
-			msg = "Alt," + msg;
-		if (kshiftpressed)
-			msg = "Shift," + msg;
-		if (capspressed)
-			msg = "Caps," + msg;
-
-		not.flags = Notification.FLAG_AUTO_CANCEL;
-
-		notIntent.putExtra("not", "hello");
-		notIntent.putExtra("ipaddress", IPaddress);
-
-		PendingIntent intent = PendingIntent.getActivity(
-				getApplicationContext(), requestCode, notIntent,
-				PendingIntent.FLAG_UPDATE_CURRENT);
-
-		not.setLatestEventInfo(getApplicationContext(), "Alert!", msg, intent);
-		manager.notify(notificationcode, not);
-
-	}*/
-	
 	@Override
-	public void onConfigurationChanged(Configuration newConfig)
-	{
+	public void onConfigurationChanged(Configuration newConfig) {
 		super.onConfigurationChanged(newConfig);
-		
-		Log.v("config",isKeyboardShown+"");
-		
-		if(isKeyboardShown)
-		{
+
+		Log.v("config", isKeyboardShown + "");
+
+		if (isKeyboardShown) {
 			customview.setVisibility(View.GONE);
 			showKeyboard();
 		}
-		
+
 	}
 
 	private void resetZoomState() {
@@ -604,80 +421,74 @@ public class RemoteDesktopTestActivity extends Activity {
 		mZoomControl.getZoomState().setZoom(1f);
 		mZoomControl.getZoomState().notifyObservers();
 	}
-	
-	private void cleanUp()
-	{
-		Thread cleanUp=new Thread(new Runnable() {
-			
+
+	private void cleanUp() {
+		Thread cleanUp = new Thread(new Runnable() {
+
 			@Override
 			public void run() {
-			
+
 				// TODO Auto-generated method stub
-				
+
 				try {
 					mBitmap.recycle();
-					canReceiveFrame = false;
+					receiver.canReceiveFrame = false;
 					mZoomView.setOnTouchListener(null);
 					mZoomControl.getZoomState().deleteObservers();
 					obj.setHandShake(IP_ADDRESS);
 					obj.handshakeMessage("airPcClose");
 					obj.destroy();
-					
-					frameSocket.close();
-					congestionSocket.close();
+
 					resend.cancel();
+					// receiver.quit();
+					// frameSocket.close();
+					// congestionSocket.close();
 
 				} catch (Exception e) {
 				}
-				
-				
+
 			}
 		});
-		
+
 		cleanUp.start();
 	}
-	
-	
+
 	@Override
 	protected void onResume() {
 		// TODO Auto-generated method stub
 		super.onResume();
-		
-		resend=new Timer();
-		resend.schedule(new reSend(),50,50);
+
+		resend = new Timer();
+		resend.schedule(new reSend(), 50, 50);
 	}
-	
+
 	@Override
 	protected void onPause() {
 		// TODO Auto-generated method stub
 		super.onPause();
 		Log.v("onPause", "true");
-		
-		if(resend!=null)
-		{
+
+		if (resend != null) {
 			resend.cancel();
-			
-			
+
 		}
-		
-		
-		
+
 	}
-	
+
 	@Override
 	protected void onStop() {
 		// TODO Auto-generated method stub
 		super.onStop();
-		
+
 		finish();
 	}
-	
+
 	@Override
 	public void onDestroy() {
 		super.onDestroy();
-		
+
 		cleanUp();
-		
+
 	}
 
 	// -------------------------------
